@@ -1,6 +1,6 @@
 # To Share or Not To Share: A Comprehensive Appraisal of Weight-Sharing
 
-This directory contains all the code necessary to reproduce the results of the paper.
+This directory contains all the code necessary to reproduce the results of the paper: https://arxiv.org/abs/2002.04289v1
 
 __Main Dependencies:__
 * PyTorch (https://github.com/pytorch/pytorch)
