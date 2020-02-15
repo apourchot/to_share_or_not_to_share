@@ -46,7 +46,7 @@ exp_params = {
     "layers_params": {
         "conv_bias": False,  # bias on conv layers
         "affine_bn": True,  # affine parameters on bn layers
-        "bn_momentum": 0.997,  # momentum on bn layers
+        "bn_momentum": 0.003,  # momentum on bn layers. Careful: PyTorch and tensorflow conventions are different !
         "bn_eps": 1e-5,  # eps on bn layers
     },
 
