@@ -4,6 +4,93 @@ import numpy as np
 import torch
 from torch.optim.optimizer import Optimizer
 from torchvision import transforms
+from torch.utils.data import dataset, Subset
+from torchvision import datasets
+
+
+def get_scheduler(optimizer, config):
+    """
+    Creates the scheduler from the config
+    """
+    if config["name"] == "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config["T_max"])
+        return scheduler
+    else:
+        raise NotImplementedError
+
+
+def get_optimizer(params, config):
+    """
+    Creates an optimizer from the given config
+    """
+    if config["name"] == "SGD":
+        optimizer = torch.optim.SGD(params, lr=config["lr"], momentum=config["momentum"],
+                                    weight_decay=config["weight_decay"], nesterov=config["nesterov"])
+        return optimizer
+    if config["name"] == "TFRMSprop":
+        optimizer = TFRMSprop(params, lr=config["lr"], momentum=config["momentum"],
+                              eps=config["eps"], weight_decay=config["weight_decay"])
+        return optimizer
+    else:
+        raise NotImplementedError
+
+
+def get_criterion(config):
+    """
+    Creates the torch criterion for optimization
+    """
+    if config["name"] == "cross_entropy":
+        return torch.nn.CrossEntropyLoss()
+    else:
+        raise NotImplementedError
+
+
+def get_data_iters(config):
+    """
+    Creates the train and validation data iterators on the given dataset
+    :param config:
+    :return:
+    """
+    if config["name"] == "cifar10":
+
+        # Loading Data
+        train_transform, valid_transform = data_transforms_cifar10(cutout=False, cutout_length=16)
+        data_train = datasets.CIFAR10("./datasets/cifar10", train=True, download=True, transform=train_transform)
+        data_valid = datasets.CIFAR10("./datasets/cifar10", train=False, download=True, transform=valid_transform)
+
+        # building cyclic iterators over the training and validation sets
+        loader_train = torch.utils.data.DataLoader(data_train, batch_size=int(config["batch_size"]), shuffle=True)
+        loader_valid = torch.utils.data.DataLoader(data_valid, batch_size=int(config["batch_size"]), shuffle=True)
+
+        print("Length of datasets: Train: {}, Valid: {}".format(len(data_train), len(data_valid)))
+        print("Length of loaders: Train: {}, Valid: {}".format(len(loader_train), len(loader_valid)))
+
+        return loader_train, loader_valid
+
+    elif config["name"] == "cifar10-valid":
+
+        ratio = config["ratio"]
+
+        # Loading Data
+        train_transform, valid_transform = data_transforms_cifar10(cutout=False, cutout_length=16)
+        dataset_train = datasets.CIFAR10("./datasets/cifar10", train=True, download=True, transform=train_transform)
+        dataset_valid = datasets.CIFAR10("./datasets/cifar10", train=True, download=True, transform=valid_transform)
+
+        # training set contains 40,000 images, validation and test set contain 10,000 images
+        dataset_valid = Subset(dataset_valid, range(int(ratio * len(dataset_train)), len(dataset_train)))
+        dataset_train = Subset(dataset_train, range(int(ratio * len(dataset_train))))
+
+        # building cyclic iterators over the training and validation sets
+        loader_train = torch.utils.data.DataLoader(dataset_train, batch_size=config["batch_size"], shuffle=True)
+        loader_valid = torch.utils.data.DataLoader(dataset_valid, batch_size=config["batch_size"], shuffle=True)
+
+        print("Length of datasets: Train: {}, Valid: {}".format(len(dataset_train), len(dataset_valid)))
+        print("Length of loaders: Train: {}, Valid: {}".format(len(loader_train), len(loader_valid)))
+
+        return loader_train, loader_valid
+
+    else:
+        raise NotImplementedError
 
 
 class Cutout(object):

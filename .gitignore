@@ -1,8 +1,10 @@
 .idea
 *.pyc
-datasets/cifar*
+datasets
 *runs
 *.png
 *.gv
 *.pth
 *.ipynb_checkpoints*
+results*
+notebooks

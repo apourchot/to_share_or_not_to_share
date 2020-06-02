@@ -29,7 +29,7 @@ TRAIN:
     GRAPH_SAMPLER:
         name: "GraphSampler201"
         n_monte: 1  # number of architecture sampled in each batch
-        dataset_path: "./datasets/nasbench_201/nasbench_201_cifar10.pkl"
+        dataset_path: "/data/nasbench_201/nasbench_201_cifar10.pkl"
 
     GRAPH_MODEL:
         name: "GraphModel201"

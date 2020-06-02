@@ -49,8 +49,58 @@ class GraphSampler(object):
             return list(zip(matrices, metrics))
         return list(matrices)
 
-    def train(self):
-        pass
+    def get(self, n, return_metrics):
+        """
+        Returns the nth architecture
+        :param n:
+        :param return_metrics: whether to return the metrics associated with the architecture
+        :return: a list of matrices and operations describing
+        the sampled architecture
+        """
+        assert n < len(self.dataset)
+        matrices = []
+        metrics = []
 
-    def eval(self):
-        pass
+        # sampling datum
+        data = self.dataset[n]
+
+        # matrix used for all tasks
+        matrix = data["architecture"]
+        matrices.append(matrix)
+
+        # append metrics if necessary
+        if return_metrics:
+            metrics.append(data)
+
+        if return_metrics:
+            return list(zip(matrices, metrics))
+        return list(matrices)
+
+    def get_all(self, return_metrics):
+
+        matrices = []
+        metrics = None
+
+        if return_metrics:
+            metrics = []
+
+        # sampling an architecture n_monte times
+        for n in range(len(self.dataset)):
+
+            # sampling datum
+            data = self.dataset[n]
+
+            # matrix used for all tasks
+            matrix = data["architecture"]
+            matrices.append(matrix)
+
+            # append metrics if necessary
+            if return_metrics:
+                metrics.append(data)
+
+        if return_metrics:
+            return list(zip(matrices, metrics))
+        return list(matrices)
+
+    def get_random_perm(self):
+        return np.random.permutation(range(len(self.dataset)))

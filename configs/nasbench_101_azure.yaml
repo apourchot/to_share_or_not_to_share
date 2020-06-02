@@ -1,40 +1,45 @@
 TRAIN:
 
+    exp_name: "sp_full"
     train_seed: 12345  # seed for training; will be generated and saved automatically if set to None
-    num_epochs: 200  # total number of epochs
+    num_epochs: 108  # total number of epochs; must be equal to scheduler t_max
     perform_valid: False  # evaluate on valid set after every epoch
     use_tensorboard: True
     save: True  # save models
-    save_period: 10  # use higher values to save less models. Make sure that it divides the number of epochs
+    save_period: 4  # use higher values to save less models. Make sure that it divides the number of epochs
 
     DATA:
-        name: "cifar10"
+        name: "cifar10-valid"
         batch_size: 256
-        ratio: 0.5  # only used for cifar10-valid
+        ratio: 0.8
 
     OPTIMIZER:
-        name: "SGD"
-        lr: 0.1
+        name: "TFRMSprop"
+        lr: 0.2
         momentum: 0.9
-        weight_decay: 0.0005
-        nesterov: True
+        weight_decay: 0.0001
+        eps: 1.0
 
     SCHEDULER:
         name: "cosine"
-        T_max: 200
+        T_max: 108  # must be equal to num_epochs
 
     CRITERION:
         name: "cross_entropy"
 
     GRAPH_SAMPLER:
-        name: "GraphSampler201"
+        name: "GraphSampler101"
+        dataset_path: "/data/nasbench_101/sp_full.pkl"
         n_monte: 1  # number of architecture sampled in each batch
-        dataset_path: "./datasets/nasbench_201/nasbench_201_cifar10.pkl"
+        prorata: False  # sample pro-rata to number of parameters
+        n_nodes: 7
 
     GRAPH_MODEL:
-        name: "GraphModel201"
-        c_input: 3
+        name: "GraphModel101"
         c_init: 16  # number of channels of the first convolution
+        input_channels: 3
+        single_k: False  # use single-path
+        n_out_min: 1 # minimum number of nodes going to the output MAKE SURE THAT THIS VALUE IS CORRECT
 
         # conv layers parameters
         layers_params:
@@ -44,10 +49,10 @@ TRAIN:
             bn_eps: 0.00001  # eps on bn layers
 
         # topology of the super-net
-        n_cells: 5  # number of cells per stack
+        n_cells: 3  # number of cells per stack
         n_stacks: 3  # number of stacks
         n_classes: 10
-        n_nodes: 4
+        n_nodes: 7
 
 EVAL:
 

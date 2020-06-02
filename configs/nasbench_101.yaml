@@ -1,16 +1,17 @@
 TRAIN:
 
-    exp_name: "test_sp_4"
+    exp_name: "sp_full"
     train_seed: 12345  # seed for training; will be generated and saved automatically if set to None
-    num_epochs: 432  # total number of epochs
+    num_epochs: 108  # total number of epochs; must be equal to scheduler t_max
     perform_valid: False  # evaluate on valid set after every epoch
     use_tensorboard: True
     save: True  # save models
     save_period: 4  # use higher values to save less models. Make sure that it divides the number of epochs
 
     DATA:
-        name: "cifar10"
+        name: "cifar10-valid"
         batch_size: 256
+        ratio: 0.8
 
     OPTIMIZER:
         name: "TFRMSprop"
@@ -21,14 +22,14 @@ TRAIN:
 
     SCHEDULER:
         name: "cosine"
-        T_max: 432
+        T_max: 108  # must be equal to num_epochs
 
     CRITERION:
         name: "cross_entropy"
 
     GRAPH_SAMPLER:
         name: "GraphSampler101"
-        dataset_path: "./datasets/sp_4.pkl"
+        dataset_path: "./datasets/nasbench_101/sp_full.pkl"
         n_monte: 1  # number of architecture sampled in each batch
         prorata: False  # sample pro-rata to number of parameters
         n_nodes: 7
@@ -38,7 +39,7 @@ TRAIN:
         c_init: 16  # number of channels of the first convolution
         input_channels: 3
         single_k: False  # use single-path
-        n_out_min: 4 # minimum number of nodes going to the output MAKE SURE THAT THIS VALUE IS CORRECT
+        n_out_min: 1 # minimum number of nodes going to the output MAKE SURE THAT THIS VALUE IS CORRECT
 
         # conv layers parameters
         layers_params:

@@ -211,7 +211,7 @@ class Graph(nn.Module):
 
     def get_bn_momentum(self):
         """
-        Returns the current bn momentum
+        Returns the current bn momentum of all bn layers
         """
         for name, module in self.named_modules():
             if "BatchNorm2d" in str(type(module)):

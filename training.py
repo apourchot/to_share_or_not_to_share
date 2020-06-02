@@ -1,37 +1,96 @@
 import os
-import pickle
+import yaml
 import time
-from copy import deepcopy
+import pickle
 
 import numpy as np
 import torch
-import yaml
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
 
+from copy import deepcopy
+from utils import get_scheduler, get_optimizer, get_criterion
 from utils import set_seed
 
+from itertools import cycle
 
-def train_supernet(model_dir, model, graph_s, criterion, optimizer, scheduler, train_iter, valid_iter, config, device):
+
+def time_profiling(results_dir, model, task_sampler, loader_train, device, config):
     """
-    :param model_dir:
+    Measure the time necessary to perform forward / backward prop on current device
+    :param results_dir:
     :param model:
-    :param graph_s:
-    :param criterion:
-    :param optimizer:
-    :param scheduler:
+    :param task_sampler:
+    :param loader_train:
+    :param device:
+    :param config:
+    :return:
+    """
+    # creating input
+    all_tasks = task_sampler.get_all(return_metrics=False)
+    cycle_train = cycle(loader_train)
+
+    # training stuff
+    optimizer = get_optimizer(model.parameters(), config["TRAIN"]["OPTIMIZER"])
+    criterion = get_criterion(config["TRAIN"]["CRITERION"])
+
+    # output
+    times_forward = []
+    times_backward = []
+
+    # warm-up
+    for i in tqdm(range(10), ncols=100):
+        task = all_tasks[i]
+        x, y = next(cycle_train)
+        x, y = x.to(device), y.to(device)
+
+        preds = model(x, task)
+        loss = criterion(preds, y)
+        loss.backward()
+
+    for i in tqdm(range(len(all_tasks)), ncols=100):
+        task = all_tasks[i]
+        x, y = next(cycle_train)
+        x, y = x.to(device), y.to(device)
+
+        # forward time
+        t_f = time.time()
+        pred = model(x, task)
+        dt_f = time.time() - t_f
+        times_forward.append(dt_f)
+
+        # backward time
+        t_b = time.time()
+        loss = criterion(pred, y)
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+        dt_b = time.time() - t_b
+        times_backward.append(dt_b)
+
+    with open(os.path.join(results_dir, "forward_times.pkl"), "wb") as f:
+        pickle.dump(times_forward, f)
+    with open(os.path.join(results_dir, "backward_times.pkl"), "wb") as f:
+        pickle.dump(times_backward, f)
+
+
+def train_supernet(results_dir, model, task_sampler, train_iter, valid_iter, device, config):
+    """
+    :param results_dir:
+    :param model:
+    :param task_sampler:
     :param train_iter:
     :param valid_iter:
-    :param config:
     :param device:
+    :param config:
     :return:
     """
     writer = None
     since = time.time()
 
-    seed = set_seed(config["train_seed"])
-    config["train_seed"] = seed
-    with open(os.path.join(model_dir, "train_config.yaml"), "w") as f:
+    seed = set_seed(config["TRAIN"]["train_seed"])
+    config["TRAIN"]["train_seed"] = seed
+    with open(os.path.join(results_dir, "config.yaml"), "w") as f:
         yaml.dump(config, f)
 
     # metrics
@@ -43,11 +102,16 @@ def train_supernet(model_dir, model, graph_s, criterion, optimizer, scheduler, t
     # data iterators
     iters = {"train": train_iter, "valid": valid_iter}
 
+    # training stuff
+    optimizer = get_optimizer(model.parameters(), config["TRAIN"]["OPTIMIZER"])
+    scheduler = get_scheduler(optimizer, config["TRAIN"]["SCHEDULER"])
+    criterion = get_criterion(config["TRAIN"]["CRITERION"])
+
     # training
-    for epoch in range(config["num_epochs"]):
+    for epoch in range(config["TRAIN"]["num_epochs"]):
 
         print("-" * 100)
-        print("Iter Epoch {}/{}".format(epoch + 1, config["num_epochs"]))
+        print("Iter Epoch {}/{}".format(epoch + 1, config["TRAIN"]["num_epochs"]))
         print("-" * 100)
 
         epoch_metrics = {
@@ -70,9 +134,7 @@ def train_supernet(model_dir, model, graph_s, criterion, optimizer, scheduler, t
                 if phase == "train":
 
                     model.train()
-                    graph_s.train()
-
-                    tasks = graph_s.sample(n_monte=config["GRAPH_SAMPLER"]["n_monte"])
+                    tasks = task_sampler.sample(n_monte=config["TRAIN"]["GRAPH_SAMPLER"]["n_monte"])
                     loss_t = None
                     accs_t = []
 
@@ -84,9 +146,9 @@ def train_supernet(model_dir, model, graph_s, criterion, optimizer, scheduler, t
 
                         # computing gradient
                         if loss_t is None:
-                            loss_t = criterion(preds_t, y_t) / config["GRAPH_SAMPLER"]["n_monte"]
+                            loss_t = criterion(preds_t, y_t) / config["TRAIN"]["GRAPH_SAMPLER"]["n_monte"]
                         else:
-                            loss_t += criterion(preds_t, y_t) / config["GRAPH_SAMPLER"]["n_monte"]
+                            loss_t += criterion(preds_t, y_t) / config["TRAIN"]["GRAPH_SAMPLER"]["n_monte"]
 
                         # saving accuracies
                         accs_t.append(np.mean((torch.max(preds_t, dim=1)[1] == y_t).cpu().numpy()))
@@ -94,6 +156,7 @@ def train_supernet(model_dir, model, graph_s, criterion, optimizer, scheduler, t
                     # update
                     loss_t.backward()
                     optimizer.step()
+                    scheduler.step(epoch)
                     model.none_grad()
 
                     # adding metrics
@@ -101,12 +164,10 @@ def train_supernet(model_dir, model, graph_s, criterion, optimizer, scheduler, t
                     epoch_metrics[phase]["losses_train"].append(loss_t.item())
                     epoch_metrics[phase]["accs_train"].append(np.mean(accs_t))
 
-                elif config["perform_valid"]:
+                elif config["TRAIN"]["perform_valid"]:
 
                     model.eval()
-                    graph_s.eval()
-
-                    task = graph_s.sample(n_monte=1)
+                    task = task_sampler.sample()[0]
 
                     # forward
                     x_v, y_v = x.to(device), y.to(device)
@@ -122,8 +183,6 @@ def train_supernet(model_dir, model, graph_s, criterion, optimizer, scheduler, t
                 else:
                     break
 
-        scheduler.step()
-
         # average metrics over epoch
         to_print = "\n"
         for phase in ["train", "valid"]:
@@ -138,9 +197,9 @@ def train_supernet(model_dir, model, graph_s, criterion, optimizer, scheduler, t
             to_print += "\n"
 
         # tensorboard integration to plot nice curves
-        if config["use_tensorboard"]:
-            if config["use_tensorboard"] and writer is None:
-                writer = SummaryWriter(model_dir)
+        if config["TRAIN"]["use_tensorboard"]:
+            if config["TRAIN"]["use_tensorboard"] and writer is None:
+                writer = SummaryWriter(results_dir)
             for phase in ["train", "valid"]:
                 for key, value in epoch_metrics[phase].items():
                     if value is not None:
@@ -150,94 +209,21 @@ def train_supernet(model_dir, model, graph_s, criterion, optimizer, scheduler, t
         print(to_print + "Time Elapsed: {:.0f}m {:.0f}s".format(time_elapsed // 60, time_elapsed % 60))
 
         # save everything
-        if config["save"] and ((epoch + 1) % config["save_period"] == 0):
+        if config["TRAIN"]["save"] and ((epoch + 1) % config["TRAIN"]["save_period"] == 0):
 
             # saving model
-            weights_path = os.path.join(model_dir, "model_weights_epoch_{0}_of_{1}.pth".
-                                        format(epoch + 1, config["num_epochs"]))
+            weights_path = os.path.join(results_dir, "model_weights_epoch_{0}_of_{1}.pth".
+                                        format(epoch + 1, config["TRAIN"]["num_epochs"]))
             torch.save(model.state_dict(), weights_path)
 
             # saving stuff to retrieve
-            with open(os.path.join(model_dir, "total_metrics.pkl"), "wb") as handle:
+            with open(os.path.join(results_dir, "total_metrics.pkl"), "wb") as handle:
                 pickle.dump(total_metrics, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     time_elapsed = time.time() - since
     print("Training complete in {:.0f}m {:.0f}s".format(time_elapsed // 60, time_elapsed % 60))
 
     return total_metrics
-
-
-def ft_bn_stats(model, task, train_iter, n_ft_bn_stats, device):
-    """
-    Fine-tune the batch norm stats to the task at hand
-    :param model:
-    :param task:
-    :param train_iter:
-    :param n_ft_bn_stats:
-    :param device:
-    :return:
-    """
-    model.train()  # in order to update bn stats
-
-    bn_momentum = model.get_bn_momentum()
-    model.set_bn_momentum(1.0)  # so no data leaks from a batch to the other
-
-    # compute bn stats with given task
-    bn_means = {n: torch.zeros_like(m.running_mean) for (n, m) in model.named_modules() if "BatchNorm" in str(type(m))}
-    bn_vars = {n: torch.zeros_like(m.running_var) for (n, m) in model.named_modules() if "BatchNorm" in str(type(m))}
-
-    # we don't need gradients
-    with torch.no_grad():
-        for n, (x_t, y_t) in enumerate(train_iter):
-
-            if n < n_ft_bn_stats:
-                x_t, y_t = x_t.to(device), y_t.to(device)
-                model.forward(x_t, task)
-
-                for name, module in model.named_modules():
-                    if "BatchNorm" in str(type(module)):
-                        bn_means[name] += module.running_mean / n_ft_bn_stats
-                        bn_vars[name] += module.running_var / n_ft_bn_stats
-
-            else:
-                break
-
-    model.set_bn_momentum(bn_momentum)  # reset momentum to initial value
-
-
-# TBD
-def ft_weights(model, task, train_iter, exp_params):
-    """
-    Fine-tune the weights of the super-net to the task at hand
-    :param model:
-    :param task:
-    :param train_iter:
-    :param exp_params:
-    :return:
-    """
-    # fine-tuning stuff
-    model.train()
-
-    # temporary optimizer
-    optimizer = exp_params["optimizer"](model.parameters(), **exp_params["optimizer_params"])
-    scheduler = exp_params["scheduler"](optimizer, T_max=exp_params["n_ft_weights"])
-
-    n_steps = 0
-    while n_steps < exp_params["n_ft_weights"]:
-        for x_t, y_t in train_iter:
-
-            x_t, y_t = x_t.to(exp_params["device"]), y_t.to(exp_params["device"])
-            preds_t = model.forward(x_t, task)
-            loss_t = exp_params["criterion"](preds_t, y_t)
-
-            optimizer.zero_grad()
-            loss_t.backward()
-            optimizer.step()
-            scheduler.step()
-
-            n_steps += 1
-            if n_steps >= exp_params["n_ft_weights"]:
-                break
 
 
 def eval_model(model, task, valid_iter, device):
@@ -250,7 +236,6 @@ def eval_model(model, task, valid_iter, device):
     :return:
     """
     model.eval()
-
     total_correct_v = []
     with torch.no_grad():
         for x_v, y_v in valid_iter:
@@ -262,60 +247,145 @@ def eval_model(model, task, valid_iter, device):
     return accs
 
 
-def eval_supernet(model_dir, model, task_sampler, train_iter, valid_iter, config, device):
+def eval_supernet(results_dir, model, task_sampler, train_iter, valid_iter, device, config):
     """
     Evaluates the supernet on several sampled models
-    :param model_dir:
+    :param results_dir:
     :param model:
     :param task_sampler:
     :param train_iter:
     :param valid_iter:
-    :param config:
     :param device:
+    :param config:
     :return:
     """
-    seed = set_seed(config["eval_seed"])
-    config["eval_seed"] = seed
-    with open(os.path.join(model_dir, "eval_config.yaml"), "w") as f:
+    seed = set_seed(config["EVAL"]["eval_seed"])  # to retrieve the sampled models
+    config["EVAL"]["eval_seed"] = seed
+    with open(os.path.join(results_dir, "config.yaml"), 'w') as f:
         yaml.dump(config, f)
-
-    # evaluating mode for task sampler i.e back to uniform sampling
-    task_sampler.eval()
 
     # current state dict of the super net, it is saved here and loaded before
     # each evaluation to ensure independent evaluations of the models
     state_dict = deepcopy(model.state_dict())
 
+    # sample models without replacement
+    random_perm = task_sampler.get_random_perm()
+
     # evaluating n_rand_eval models
     results = []
-    for _ in tqdm(range(config["n_rand_evals"]), ncols=100):
+    for i in tqdm(range(max(config["EVAL"]["n_rand_evals"]), len(random_perm)), ncols=100):
 
         # reload load params of the supernet, including bn stats
         model.load_state_dict(state_dict)
 
         # sample a model to evaluate
-        task, metrics = task_sampler.sample(n_monte=1, return_metrics=True)[0]
+        task, metrics = task_sampler.get(n=random_perm[i], return_metrics=True)[0]
 
         # perform the necessary fine-tuning
-        if config["ft_bn_stats"]:
-            ft_bn_stats(model, task, train_iter, config["n_ft_bn_stats"], device)
-        if config["ft_weights"]:
-            ft_weights(model, task, train_iter, config)
+        ft_dt = time.time()
+        if config["EVAL"]["ft_bn_stats"]:
+            ft_bn_stats(model, task, train_iter, device, config)
+        if config["EVAL"]["ft_weights"]:
+            ft_weights(model, task, train_iter, device, config)
+        ft_dt = time.time() - ft_dt
 
         # perform eval
+        eval_dt = time.time()
         valid_accs = eval_model(model, task, valid_iter, device)
+        eval_dt = time.time() - eval_dt
 
         # appending resulting metrics
-        # bench_metrics = metrics[1][108]
         proxy_metrics = {"final_validation_accuracy": valid_accs}
         res = {
             "architecture": task,
-            "full_metrics": metrics,
-            # "bench_metrics": bench_metrics,
+            "bench_metrics": metrics,
             "proxy_metrics": proxy_metrics,
+            "ft_dt": ft_dt,
+            "eval_dt": eval_dt,
         }
         results.append(res)
 
     # save the results
-    with open(os.path.join(model_dir, "eval_results.pkl"), "wb") as f:
+    with open(os.path.join(results_dir, "eval_results.pkl"), "wb") as f:
         pickle.dump(results, f)
+
+
+def ft_bn_stats(model, task, train_iter, device, config):
+    """
+    Fine-tune only the batch norm stats to the task at hand
+    :param model:
+    :param task:
+    :param train_iter:
+    :param device:
+    :param config:
+    :return:
+    """
+    model.train()  # in order to update bn stats
+    model.set_bn_momentum(1.0)  # so no data leaks from one batch to the other
+
+    # compute bn stats with given task
+    bn_means = {n: torch.zeros_like(m.running_mean) for (n, m) in model.named_modules() if "BatchNorm" in str(type(m))}
+    bn_vars = {n: torch.zeros_like(m.running_var) for (n, m) in model.named_modules() if "BatchNorm" in str(type(m))}
+
+    # we don't need gradients
+    with torch.no_grad():
+        for n, (x_t, y_t) in enumerate(train_iter):
+
+            if n < config["EVAL"]["n_ft_bn_stats"]:
+                x_t, y_t = x_t.to(device), y_t.to(device)
+                model.forward(x_t, task)
+
+                for name, module in model.named_modules():
+                    if "BatchNorm" in str(type(module)):
+                        bn_means[name] += module.running_mean / config["EVAL"]["n_ft_bn_stats"]
+                        bn_vars[name] += module.running_var / config["EVAL"]["n_ft_bn_stats"]
+
+            else:
+                break
+
+    # reset momentum to initial value
+    model.set_bn_momentum(config["TRAIN"]["GRAPH_MODEL"]["layers_params"]["bn_momentum"])
+
+
+def ft_weights(model, task, train_iter, device, config):
+    """
+    Fine-tune the weights of the super-net to the task at hand
+    :param model:
+    :param task:
+    :param train_iter:
+    :param device:
+    :param config:
+    :return:
+    """
+    # fine-tuning stuff
+    model.train()
+
+    # optimizer
+    optimizer = get_optimizer(model.parameters(), config["TRAIN"]["OPTIMIZER"])
+
+    # scheduler
+    scheduler_config = {
+        "name": config["TRAIN"]["SCHEDULER"]["name"],
+        "T_max": config["EVAL"]["n_ft_weights"]
+    }
+    scheduler = get_scheduler(optimizer, scheduler_config)
+
+    # criterion
+    criterion = get_criterion(config["TRAIN"]["CRITERION"])
+
+    n_steps = 0
+    while n_steps < config["EVAL"]["n_ft_weights"]:
+        for x_t, y_t in train_iter:
+
+            x_t, y_t = x_t.to(device), y_t.to(device)
+            preds_t = model.forward(x_t, task)
+            loss_t = criterion(preds_t, y_t)
+
+            optimizer.zero_grad()
+            loss_t.backward()
+            optimizer.step()
+            scheduler.step()
+
+            n_steps += 1
+            if n_steps >= config["EVAL"]["n_ft_weights"]:
+                break

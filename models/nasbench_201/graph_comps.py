@@ -1,8 +1,10 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from models.nasbench_201.base_ops import (AvgPool3x3, Conv1x1, Conv3x3, Skip,
                                           Zero)
+from models.nasbench_201.utils import ResNetBasicBlock, ReLUConvBN
 
 
 class Edge(nn.Module):
@@ -10,14 +12,14 @@ class Edge(nn.Module):
     An edge in the DAG. This represents an operation
     applied to the data.
     """
-    def __init__(self, c_in, conv_bias=False, bn_affine=True, bn_momentum=0.1):
+    def __init__(self, c_in, conv_bias=False, bn_affine=True, bn_momentum=0.1, bn_eps=0.00001):
 
         super(Edge, self).__init__()
         self.ops = nn.ModuleList([
             Zero(),
             Skip(),
-            Conv1x1(c_in, c_in, conv_bias=conv_bias, bn_affine=bn_affine, bn_momentum=bn_momentum),
-            Conv3x3(c_in, c_in, conv_bias=conv_bias, bn_affine=bn_affine, bn_momentum=bn_momentum),
+            Conv1x1(c_in, c_in, conv_bias=conv_bias, bn_affine=bn_affine, bn_momentum=bn_momentum, bn_eps=bn_eps),
+            Conv3x3(c_in, c_in, conv_bias=conv_bias, bn_affine=bn_affine, bn_momentum=bn_momentum, bn_eps=bn_eps),
             AvgPool3x3()
         ])
 
@@ -64,8 +66,7 @@ class Cell(nn.Module):
             data_in = []
             for j in range(0, i - 1):
 
-                # project if coming from the input
-                # else take the intermediate representation
+                # take the intermediate representation
                 h = self.edges["{}_{}".format(j, i)](states[j], id_op=matrix[i, j])
 
                 # append to input data
@@ -103,15 +104,12 @@ class Graph(nn.Module):
         self.cell_stacks = nn.ModuleList()
         for i in range(self.n_stacks):
             self.cell_stacks.append(nn.ModuleList([Cell(self.n_nodes, self.c_init * 2 ** i,
-                                                         layers_params) for _ in range(self.n_cells)]))
+                                                        layers_params) for _ in range(self.n_cells)]))
 
         # res blocks with strides
         self.res_blocks = nn.ModuleList()
         for i in range(self.n_stacks - 1):
-            self.res_blocks.append(nn.Sequential(nn.AvgPool2d(2, stride=2),
-                                                 nn.Conv2d(self.c_init * 2 ** i,
-                                                           self.c_init * 2 * 2 ** i,
-                                                           kernel_size=1)))
+            self.res_blocks.append(ResNetBasicBlock(self.c_init * 2 ** i, self.c_init * 2 * 2 ** i, 2))
 
         # avg pool and classifier
         self.global_pooling = nn.AdaptiveAvgPool2d(1)
@@ -133,6 +131,7 @@ class Graph(nn.Module):
         for cell in self.cell_stacks[-1]:
             x = cell(x, matrix)
 
+        x = F.relu(x)
         x = self.global_pooling(x)
         x = self.classifier(x.view(x.size(0), -1))
         return x

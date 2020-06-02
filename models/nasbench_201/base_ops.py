@@ -1,5 +1,5 @@
 import torch.nn as nn
-
+from models.nasbench_201.utils import ReLUConvBN
 
 class Zero(nn.Module):
     """
@@ -29,13 +29,11 @@ class Conv1x1(nn.Module):
     conv-1x1 op
     """
 
-    def __init__(self, in_channels, out_channels, stride=1, padding=0,
-                 conv_bias=False, bn_affine=True, bn_momentum=0.1):
+    def __init__(self, in_channels, out_channels, stride=1, padding=0, dilation=1,
+                 conv_bias=False, bn_affine=True, bn_momentum=0.1, bn_eps=0.00001):
         super(Conv1x1, self).__init__()
-        self.op = nn.Sequential(nn.ReLU(),
-                                nn.Conv2d(in_channels, out_channels, kernel_size=1,
-                                          stride=stride, padding=padding, bias=conv_bias),
-                                nn.BatchNorm2d(out_channels, affine=bn_affine, momentum=bn_momentum))
+        self.op = ReLUConvBN(in_channels, out_channels, 1, stride, padding, dilation,
+                             conv_bias, bn_affine, bn_momentum, bn_eps, bn_eps)
 
     def forward(self, x):
         return self.op(x)
@@ -46,13 +44,11 @@ class Conv3x3(nn.Module):
     conv-1x1 op
     """
 
-    def __init__(self, in_channels, out_channels, stride=1, padding=1,
-                 conv_bias=False, bn_affine=True, bn_momentum=0.1):
+    def __init__(self, in_channels, out_channels, stride=1, padding=1, dilation=1,
+                 conv_bias=False, bn_affine=True, bn_momentum=0.1, bn_eps=0.00001):
         super(Conv3x3, self).__init__()
-        self.op = nn.Sequential(nn.ReLU(),
-                                nn.Conv2d(in_channels, out_channels, kernel_size=3,
-                                          stride=stride, padding=padding, bias=conv_bias),
-                                nn.BatchNorm2d(out_channels, affine=bn_affine, momentum=bn_momentum))
+        self.op = ReLUConvBN(in_channels, out_channels, 3, stride, padding, dilation,
+                             conv_bias, bn_affine, bn_momentum, bn_eps, bn_eps)
 
     def forward(self, x):
         return self.op(x)

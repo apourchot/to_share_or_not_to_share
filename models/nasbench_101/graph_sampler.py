@@ -19,7 +19,6 @@ class GraphSampler(object):
         print("Number of architectures: {}".format(len(self.dataset)))
 
         # build probs
-        self.prorata = prorata
         if prorata:  # sample prorata to number of params
             self.probs = np.array([d[0]["trainable_parameters"] for d in self.dataset])
         else:
@@ -75,11 +74,75 @@ class GraphSampler(object):
             return list(zip(zip(matrices, ops_list), metrics))
         return list(zip(matrices, ops_list))
 
-    def train(self):
-        if self.prorata:  # sample prorata to number of params
-            self.probs = np.array([d[0]["trainable_parameters"] for d in self.dataset])
-        self.probs = self.probs / np.sum(self.probs)
+    def get(self, n, return_metrics=False):
+        """
+        Returns the nth architecture
+        :param n: index of model to return
+        :param return_metrics: whether to return the metrics associated with the architecture
+        the sampled architecture
+        """
+        assert n < len(self.dataset)
+        matrices = []
+        ops_list = []
+        metrics = []
 
-    def eval(self):
-        self.probs = np.ones(len(self.dataset))
-        self.probs = self.probs / np.sum(self.probs)
+        # sampling datum
+        data = self.dataset[n]
+
+        # matrix used for all tasks
+        matrix = data[0]["module_adjacency"]
+        matrices.append(matrix)
+
+        # operation to be used
+        module_ops = data[0]["module_operations"]
+        n_ops = len(module_ops)
+        ops = np.zeros(n_ops - 2)
+        for i in range(n_ops - 2):
+            ops[i] = self.ops_idx[module_ops[i + 1]]
+        ops_list.append(ops)
+
+        # append metrics if necessary
+        if return_metrics:
+            metrics.append(data)
+
+        if return_metrics:
+            return list(zip(zip(matrices, ops_list), metrics))
+        return list(zip(matrices, ops_list))
+
+    def get_all(self, return_metrics):
+
+        matrices = []
+        ops_list = []
+        metrics = None
+
+        if return_metrics:
+            metrics = []
+
+        # sampling an architecture n_monte times
+        for n in range(len(self.dataset)):
+
+            # sampling datum
+            data = self.dataset[n]
+
+            # matrix used for all tasks
+            matrix = data[0]["module_adjacency"]
+            matrices.append(matrix)
+
+            # operation to be used
+            module_ops = data[0]["module_operations"]
+            n_ops = len(module_ops)
+            ops = np.zeros(n_ops - 2)
+            for i in range(n_ops - 2):
+                ops[i] = self.ops_idx[module_ops[i + 1]]
+            ops_list.append(ops)
+
+            # append metrics if necessary
+            if return_metrics:
+                metrics.append(data)
+
+        if return_metrics:
+            return list(zip(zip(matrices, ops_list), metrics))
+        return list(zip(matrices, ops_list))
+
+    def get_random_perm(self):
+        return np.random.permutation(range(len(self.dataset)))

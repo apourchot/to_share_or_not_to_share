@@ -4,6 +4,7 @@ from models.nasbench_201.graph_comps import Graph as GraphModel201
 from models.nasbench_201.graph_sampler import GraphSampler as GraphSampler201
 
 
+# supernets
 def graph_model_101_factory(config):
     model = GraphModel101(**config)
     return model
@@ -24,6 +25,7 @@ def model_factory(config):
     return meta[config["name"]](config)
 
 
+# samplers
 def graph_sampler_101_factory(config):
     model = GraphSampler101(**config)
     return model
